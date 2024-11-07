@@ -1,0 +1,168 @@
+1. Make sure that db parameter summarize_wal is enabled.
+
+Note: summarize_wal cannot be enabled when wal_level set to minimal.
+
+
+
+[postgres@PODPG-BKP-01 ~]$ psql -p 8888
+psql (16.4, server 17.0)
+WARNING: psql major version 16, server major version 17.
+         Some psql features might not work.
+Type "help" for help.
+
+postgres=# show summarize_wal
+
+postgres=# show summarize_wal ;
+ summarize_wal
+---------------
+ on
+(1 row)
+
+postgres=# \q
+
+
+
+
+postgres=# create table test(id int, name varchar, updated_at timestamptz);
+CREATE TABLE
+postgres=# insert into test values(1,'full backup',now());
+INSERT 0 1
+postgres=# show timezone;
+   TimeZone
+--------------
+ Asia/Kolkata
+(1 row)
+
+postgres=# select * from test;
+ id |    name     |           updated_at
+----+-------------+---------------------------------
+  1 | full backup | 2024-11-07 10:20:53.92596+05:30
+(1 row)
+
+
+Now, initiate full backup< you can also take backup in TAR format.
+
+
+[postgres@PODPG-BKP-01 ~]$ /usr/pgsql-17/bin/pg_basebackup -p 8888 -D /mnt/backup/full_bkp1 -v
+pg_basebackup: initiating base backup, waiting for checkpoint to complete
+pg_basebackup: checkpoint completed
+pg_basebackup: write-ahead log start point: 0/A000028 on timeline 1
+pg_basebackup: starting background WAL receiver
+pg_basebackup: created temporary replication slot "pg_basebackup_351452"
+pg_basebackup: write-ahead log end point: 0/A000120
+pg_basebackup: waiting for background process to finish streaming ...
+pg_basebackup: syncing data to disk ...
+pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+pg_basebackup: base backup completed
+[postgres@PODPG-BKP-01 ~]$
+
+
+[postgres@PODPG-BKP-01 ~]$ ls -lrth /mnt/backup/full_bkp1
+total 272K
+drwx------ 4 postgres postgres 4.0K Nov  7 10:23 pg_wal
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_tblspc
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_stat_tmp
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_dynshmem
+-rw------- 1 postgres postgres   30 Nov  7 10:23 current_logfiles
+-rw------- 1 postgres postgres  225 Nov  7 10:23 backup_label
+-rw------- 1 postgres postgres  30K Nov  7 10:23 postgresql.conf
+-rw------- 1 postgres postgres  109 Nov  7 10:23 postgresql.auto.conf
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_xact
+-rw------- 1 postgres postgres    3 Nov  7 10:23 PG_VERSION
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_twophase
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_subtrans
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_stat
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_snapshots
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_serial
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_replslot
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_notify
+drwx------ 4 postgres postgres 4.0K Nov  7 10:23 pg_logical
+-rw------- 1 postgres postgres 2.6K Nov  7 10:23 pg_ident.conf
+-rw------- 1 postgres postgres 5.6K Nov  7 10:23 pg_hba.conf
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 pg_commit_ts
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 log
+drwx------ 4 postgres postgres 4.0K Nov  7 10:23 pg_multixact
+drwx------ 5 postgres postgres 4.0K Nov  7 10:23 base
+drwx------ 2 postgres postgres 4.0K Nov  7 10:23 global
+-rw------- 1 postgres postgres 137K Nov  7 10:23 backup_manifest
+[postgres@PODPG-BKP-01 ~]$
+
+
+
+The backup_manifest file contains the details of the backup and serves as input for the next incremental backup.
+
+
+[postgres@PODPG-BKP-01 ~]$ tail -f /mnt/backup/full_bkp/backup_manifest
+{ "Path": "base/1/2674", "Size": 65536, "Last-Modified": "2024-11-06 09:43:24 GMT", "Checksum-Algorithm": "CRC32C", "Checksum": "5badaa3f" },
+{ "Path": "base/1/548", "Size": 8192, "Last-Modified": "2024-11-06 09:43:24 GMT", "Checksum-Algorithm": "CRC32C", "Checksum": "6ddd3bd9" },
+{ "Path": "base/1/3080", "Size": 16384, "Last-Modified": "2024-11-06 09:43:24 GMT", "Checksum-Algorithm": "CRC32C", "Checksum": "710949ee" },
+{ "Path": "base/1/3456_fsm", "Size": 24576, "Last-Modified": "2024-11-06 09:43:24 GMT", "Checksum-Algorithm": "CRC32C", "Checksum": "81255e68" },
+{ "Path": "global/pg_control", "Size": 8192, "Last-Modified": "2024-11-06 09:56:34 GMT", "Checksum-Algorithm": "CRC32C", "Checksum": "43872087" }
+],
+"WAL-Ranges": [
+{ "Timeline": 1, "Start-LSN": "0/6000028", "End-LSN": "0/6000120" }
+],
+"Manifest-Checksum": "4e01686a634effe26c47004f2e317f6f9c0333fea53da5843046be42b7039f94"}
+^C
+[postgres@PODPG-BKP-01 ~]$
+
+
+
+
+Taking Incremental Backup,
+
+postgres=#  insert into test values(2,'incr backup1',now());
+INSERT 0 1
+postgres=# select * from test;
+ id |     name     |            updated_at
+----+--------------+----------------------------------
+  1 | full backup  | 2024-11-07 10:20:53.92596+05:30
+  2 | incr backup1 | 2024-11-07 10:25:24.563877+05:30
+(2 rows)
+
+
+
+[postgres@PODPG-BKP-01 ~]$ /usr/pgsql-17/bin/pg_basebackup -p 8888 -i /mnt/backup/full_bkp1/backup_manifest -D /mnt/backup/incr2 -v
+pg_basebackup: initiating base backup, waiting for checkpoint to complete
+pg_basebackup: checkpoint completed
+pg_basebackup: write-ahead log start point: 0/E000028 on timeline 1
+pg_basebackup: starting background WAL receiver
+pg_basebackup: created temporary replication slot "pg_basebackup_506230"
+pg_basebackup: write-ahead log end point: 0/E000120
+pg_basebackup: waiting for background process to finish streaming ...
+pg_basebackup: syncing data to disk ...
+pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+pg_basebackup: base backup completed
+
+
+Combine backup :
+
+[postgres@PODPG-BKP-01 ~]$ /usr/pgsql-17/bin/pg_combinebackup /mnt/backup/full_bkp1 /mnt/backup/incr2 -o /mnt/backup/new_datadir/
+
+
+Started db :
+
+[postgres@PODPG-BKP-01 ~]$ /usr/pgsql-17/bin/pg_ctl -D /mnt/backup/new_datadir/ start
+waiting for server to start....2024-11-07 10:32:13.754 IST [540230] LOG:  redirecting log output to logging collector process
+2024-11-07 10:32:13.754 IST [540230] HINT:  Future log output will appear in directory "log".
+ done
+server started
+
+
+
+
+[postgres@PODPG-BKP-01 ~]$ du -sh /mnt/backup/new_datadir/
+39M     /mnt/backup/new_datadir/
+[postgres@PODPG-BKP-01 ~]$
+
+
+postgres=# select * from test;
+ id |     name     |            updated_at
+----+--------------+----------------------------------
+  1 | full backup  | 2024-11-07 10:20:53.92596+05:30
+  2 | incr backup1 | 2024-11-07 10:25:24.563877+05:30
+(2 rows)
+
+
+
+
